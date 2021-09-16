@@ -66,6 +66,10 @@ export abstract class BaseCommand extends Command {
       required: false,
       default: 3,
     }),
+    minSplits: flags.integer({
+      required: false,
+      default: 1,
+    }),
     maxSplits: flags.integer({
       required: false,
       default: 3,
@@ -145,6 +149,16 @@ export abstract class BaseCommand extends Command {
       router: routerStr,
       debug,
       debugJSON,
+      topN,
+      topNTokenInOut,
+      topNSecondHop,
+      topNWithEachBaseToken,
+      topNWithBaseToken,
+      topNWithBaseTokenInSet,
+      maxSwapsPerPath,
+      minSplits,
+      maxSplits,
+      distributionPercent,
       tokenListURI,
     } = query.flags;
 
@@ -183,7 +197,7 @@ export abstract class BaseCommand extends Command {
     const chainName = ID_TO_NETWORK_NAME(chainIdNumb);
 
     const provider = new ethers.providers.JsonRpcProvider(
-      process.env.JSON_RPC_PROVIDER!,
+      chainId == ChainId.MAINNET ? process.env.JSON_RPC_PROVIDER! : process.env.JSON_RPC_PROVIDER_RINKEBY!,
       chainName
     );
 
@@ -200,22 +214,23 @@ export abstract class BaseCommand extends Command {
       );
     }
 
-    const multicall2Provider = new UniswapMulticallProvider(provider);
+    const multicall2Provider = new UniswapMulticallProvider(chainId, provider);
     this._poolProvider = new PoolProvider(multicall2Provider);
 
     // initialize tokenProvider
     const tokenProviderOnChain = new TokenProvider(chainId, multicall2Provider);
     this._tokenProvider = new TokenProviderWithFallback(
+      chainId,
       tokenListProvider,
       tokenProviderOnChain
     );
 
-    // initialize router
+    let router: IRouter<any>;
     if (routerStr == 'legacy') {
       this._router = new LegacyRouter({
         chainId,
         multicall2Provider,
-        poolProvider: new PoolProvider(multicall2Provider),
+        poolProvider: new PoolProvider(chainId, multicall2Provider),
         quoteProvider: new QuoteProvider(provider, multicall2Provider),
         tokenProvider: this.tokenProvider,
       });
@@ -223,14 +238,15 @@ export abstract class BaseCommand extends Command {
       const router = new AlphaRouter({
         provider,
         chainId,
-        subgraphProvider: new CachingSubgraphProvider(
-          new SubgraphProvider(undefined, 10000)
+        subgraphProvider: new CachingSubgraphProvider(chainId,
+          new SubgraphProvider(chainId, undefined, 10000)
         ),
         multicall2Provider: multicall2Provider,
-        poolProvider: new CachingPoolProvider(
+        poolProvider: new CachingPoolProvider(chainId,
           new PoolProvider(multicall2Provider)
         ),
         quoteProvider: new QuoteProvider(
+          chainId,
           provider,
           multicall2Provider,
           {
@@ -244,7 +260,7 @@ export abstract class BaseCommand extends Command {
             quoteMinSuccessRate: 0.7,
           }
         ),
-        gasPriceProvider: new CachingGasStationProvider(
+        gasPriceProvider: new CachingGasStationProvider(chainId,
           new EIP1559GasPriceProvider(provider)
         ),
         gasModelFactory: new HeuristicGasModelFactory(),
@@ -254,7 +270,7 @@ export abstract class BaseCommand extends Command {
       this.id == 'quote-to-ratio'
         ? (this._swapToRatioRouter = router)
         : (this._router = router);
-    }
+      }
   }
 
   logSwapResults(
